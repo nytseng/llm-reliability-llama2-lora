@@ -6,7 +6,11 @@ import fire
 import torch
 import transformers
 from datasets import load_dataset
-import pandas
+import pandas as pd
+
+from sklearn.model_selection import KFold, StratifiedKFold
+from torch.utils.data import Dataset
+from eval_kfolds import eval_with_prompt
 
 # Command line examples
 # maximumn character len is 2200 for the essay dataset
@@ -284,6 +288,149 @@ def train(
         "\n If there's a warning about missing keys above, please disregard :)"
     )
 
+label_mapper = {"PE":"Potential Energy", "KE":"Kinetic Energy", "LCE":"Law of Conservation of Energy"}
+
+# Define the custom dataset for json creation
+class EssayDatasetWithPrompt(Dataset):
+    def __init__(self, essays, concept, labels):
+        self.essays = essays
+        self.concept = concept
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.essays)
+    
+    # returns training example in json string
+    def write(self, file_name):
+        with open(file_name, 'w') as fp:
+            fp.write("[")
+            num_row = 0
+            for row_id, essay in enumerate(self.essays):
+                label = self.labels[row_id].lower()
+                if (label=='acceptable'):
+                    label = "Yes"
+                else:
+                    label = "No"
+                if (num_row > 0): #newline for 2nd example
+                    fp.write( ",\n")
+                fp.write("{\n")
+                
+                input = essay.replace("\t","")
+                input = input.replace("\n","")
+                instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
+                fp.write('"instruction": "' + instruct  + '",\n')
+                fp.write('"input": "' + label_mapper[self.concept] + '",\n')
+
+                fp.write('"output": "' + label + '"')
+                fp.write("\n}")
+                num_row = num_row + 1
+            fp.write("]")
+
+    
+# FLAN_T5_training_v3
+def fine_tune_with_prompt(concept, data_df):
+    kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42) # reproducibility
+
+    # To store metrics for each fold
+    fold_metrics = {
+        "accuracy": [],
+        "precision": [],
+        "recall": [],
+        "f1": []
+    }
+
+    for fold, (train_idx, val_idx) in enumerate(kf.split(data_df, data_df[concept])):
+        print(f"Training fold {fold + 1} for {concept}...")
+
+        # Prepare datasets for the current fold
+        train_dataset = EssayDatasetWithPrompt(data_df['Essay'].iloc[train_idx].values, concept, data_df[concept].iloc[train_idx].values)
+        train_filename = "training_data/train_examples_" + concept + "_fold" + str(fold) + ".json"
+        train_dataset.write(train_filename)
+        eval_dataset = EssayDatasetWithPrompt(data_df['Essay'].iloc[val_idx].values, concept, data_df[concept].iloc[val_idx].values)
+
+        # print(data_df['Essay'].iloc[train_idx].values)
+        # print(eval_dataset)
+
+        model_path = 'models/essay_model_' + concept + "_fold" + str(fold)
+
+        # train(
+        #     # model/data params
+        #     base_model = 'meta-llama/Llama-2-7b-hf',  # the only required argument
+        #     data_path = train_filename,
+        #     output_dir = model_path,
+        #     # training hyperparams
+        #     # num_epochs = 50,
+        #     num_epochs = 2,
+        #     learning_rate = 0.005,
+        #     cutoff_len = 1024,
+        #     val_set_size = 0,
+        #     # lora hyperparams
+        #     lora_target_modules = [
+        #         "q_proj",
+        #         "v_proj",
+        #         "k_proj",
+        #         "o_proj"
+        #     ]
+        # )
+
+        # Prepare the model for prediction
+        label_list, pred_list = eval_with_prompt(concept, eval_dataset, model_path)
+
+        # Get predictions
+        # decoded_labels = [label.strip().lower() for label in data_df.iloc[val_idx][concept]]
+        # decoded_preds = []
+        # for essay in data_df['Essay'].iloc[val_idx].values:
+        #     #prompt = f"According to the following essay, is the student's definition of {concept} Acceptable, Unacceptable, Insufficient, or Not Found? Only use one of these labels for outputs\n{essay}"
+        #     prompt = f"According to the following essay, classify the student's definition of {concept} as {{option_1: Acceptable}}, {{option_2: Unacceptable}}, {{option_3: Insufficient}}, or {{option_4: Not Found}}\n{essay}"
+        #     input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
+        #     if torch.cuda.is_available():
+        #         input_ids = input_ids.to("cuda")
+        #     output = model.generate(input_ids, max_new_tokens=50)
+        #     # for token_id in output[0]:
+        #     #   token = tokenizer.decode(token_id, skip_special_tokens=True)
+        #     #   print(f"Token ID: {token_id}, Token: {token}")
+
+        #     pred_label = tokenizer.decode(output[0], skip_special_tokens=True)
+        #     decoded_preds.append(pred_label)
+        # print(decoded_labels)
+        # print(decoded_preds)
+        # # Calculate and store metrics
+        # accuracy = accuracy_score(decoded_labels, decoded_preds)
+        # precision, recall, f1, _ = precision_recall_fscore_support(decoded_labels, decoded_preds, average='weighted', zero_division=0)
+
+        # fold_metrics["accuracy"].append(accuracy)
+        # fold_metrics["precision"].append(precision)
+        # fold_metrics["recall"].append(recall)
+        # fold_metrics["f1"].append(f1)
+
+    # # Compute the average of the metrics across all folds
+    # avg_metrics = {metric: sum(values) / len(values) for metric, values in fold_metrics.items()}
+
+    # print(f"Average metrics across all folds for {concept}: {avg_metrics}")
+
+    # # Save the model
+    # model_save_path = f'./model_{concept}_trained'
+    # model.save_pretrained(model_save_path)
+    # tokenizer.save_pretrained(model_save_path)
+    # return model_save_path,avg_metrics
+    return None, None
+
+def train_kfolds():
+    # Standardize the labels and load data
+    data_df = pd.read_excel("Student Essays Final Annotations.xlsx")
+    data_df["PE"] = data_df["PE"].str.lower().str.strip()
+    data_df["KE"] = data_df["KE"].str.lower().str.strip()
+    data_df["LCE"] = data_df["LCE"].str.lower().str.strip()
+
+    # Train the model separately for each concept
+    metrics_PE = fine_tune_with_prompt("PE", data_df)[1]
+    metrics_KE = fine_tune_with_prompt("KE", data_df)[1]
+    metrics_LCE = fine_tune_with_prompt("LCE", data_df)[1]
+
+    # print("Average metrics for PE:", metrics_PE)
+    # print("Average metrics for KE:", metrics_KE)
+    # print("Average metrics for LCE:", metrics_LCE)
+
 
 if __name__ == "__main__":
-    fire.Fire(train)
+    fire.Fire(train_kfolds)

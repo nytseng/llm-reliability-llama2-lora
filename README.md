@@ -52,3 +52,5 @@ python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='mod
 python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model14' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 
 ; python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model15' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.004 --cutoff_len=1000 
 ; python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model16' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.006 --cutoff_len=1000 
+
+## after 50 epochs, training loss is stable

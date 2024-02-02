@@ -28,37 +28,39 @@ try:
 except:
     pass
 
-if device == "cuda":
-    model = LlamaForCausalLM.from_pretrained(
-        BASE_MODEL,
-        load_in_8bit=False,
-        torch_dtype=torch.float16,
-        device_map="auto",
-    )
-    model = PeftModel.from_pretrained(
-        model, LORA_WEIGHTS, torch_dtype=torch.float16, force_download=True, 
-    )
-elif device == "mps":
-    model = LlamaForCausalLM.from_pretrained(
-        BASE_MODEL,
-        device_map={"": device},
-        torch_dtype=torch.float16,
-    )
-    model = PeftModel.from_pretrained(
-        model,
-        LORA_WEIGHTS,
-        device_map={"": device},
-        torch_dtype=torch.float16,
-    )
-else:
-    model = LlamaForCausalLM.from_pretrained(
-        BASE_MODEL, device_map={"": device}, low_cpu_mem_usage=True
-    )
-    model = PeftModel.from_pretrained(
-        model,
-        LORA_WEIGHTS,
-        device_map={"": device},
-    )
+model = None
+
+# if device == "cuda":
+#     model = LlamaForCausalLM.from_pretrained(
+#         BASE_MODEL,
+#         load_in_8bit=False,
+#         torch_dtype=torch.float16,
+#         device_map="auto",
+#     )
+#     model = PeftModel.from_pretrained(
+#         model, LORA_WEIGHTS, torch_dtype=torch.float16, force_download=True, 
+#     )
+# elif device == "mps":
+#     model = LlamaForCausalLM.from_pretrained(
+#         BASE_MODEL,
+#         device_map={"": device},
+#         torch_dtype=torch.float16,
+#     )
+#     model = PeftModel.from_pretrained(
+#         model,
+#         LORA_WEIGHTS,
+#         device_map={"": device},
+#         torch_dtype=torch.float16,
+#     )
+# else:
+#     model = LlamaForCausalLM.from_pretrained(
+#         BASE_MODEL, device_map={"": device}, low_cpu_mem_usage=True
+#     )
+#     model = PeftModel.from_pretrained(
+#         model,
+#         LORA_WEIGHTS,
+#         device_map={"": device},
+#     )
 
 def remove_unwanted_symbols(s):
     new_column = ""
@@ -132,11 +134,6 @@ def generate_prompt(instruction, input=None):
 {instruction}
 ### Response:"""
 
-if device != "cpu":
-    model.half()
-model.eval()
-if torch.__version__ >= "2":
-    model = torch.compile(model)
 
 
 def evaluate(
@@ -173,43 +170,56 @@ def evaluate(
         output = tokenizer.decode(s)
         return output.split("### Response:")[1].strip()
 
+label_mapper = {"PE":"Potential Energy", "KE":"Kinetic Energy", "LCE":"Law of Conservation of Energy"}
 
-if __name__ == "__main__":
-    csvFile = pandas.read_csv('test_data.csv')
-    labels = ["Potential Energy", "Kinetic Energy", "Law of Conservation of Energy"]
-    label_col_names = ["PE", "KE", "LCE"]
-    input_examples = csvFile["Essay"]
-    with open('predict_output_finetune.csv', 'w', newline='') as file:
-        writer = csv.writer(file)
-        field = ["Essay ID","Essay","PE_Predicted","KE_Predicted","LCE_Predicted", "PE_Actual","KE_Actual","LCE_Actual"]
-        writer.writerow(field)
+def eval_with_prompt(concept, essay_struct, model_path):
+    # load fine-tuned model
+    global model 
+    model = LlamaForCausalLM.from_pretrained(
+        BASE_MODEL,
+        load_in_8bit=False,
+        torch_dtype=torch.float16,
+        device_map="auto",
+    )
+    model = PeftModel.from_pretrained(
+        model, model_path, torch_dtype=torch.float16, force_download=True, 
+    )
 
-        for row in range(len(input_examples)):
-            # if row >= 20:
-            #     break
-            input = input_examples[row]
-            print()
-            # print("Essay= " + input)
-            predicted = ["unacceptable","unacceptable","unacceptable"]
-            for i, label in enumerate(labels):
-                ### NOTE: make sure that training instruction is same as testing instr
-                instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
-
-                s = evaluate(instruction = instruct, input = label)
-                
-                clean_response = remove_unwanted_symbols(s)
-                if csvFile[label_col_names[i]][row].lower() == "acceptable":
-                    expected = "Yes"
-                else:
-                    expected = "No"
-                print("Label:" + label + ", Expected:" + expected + ", Response:" + clean_response)
-                
-                if "yes" in clean_response.lower():
-                    predicted[i] = "acceptable"
-
-            writer.writerow([csvFile["Essay ID"][row], input, predicted[0], predicted[1], predicted[2], csvFile["PE"][row],csvFile["KE"][row],csvFile["LCE"][row]])
+    if device != "cpu":
+        model.half()
+    model.eval()
+    if torch.__version__ >= "2":
+        model = torch.compile(model)
 
 
+    # print(essay_struct.essays)
+    
+    pred_list = [] # predictions
+    label_list = []
+    for row_id, essay in enumerate(essay_struct.essays):
+        label = essay_struct.labels[row_id].lower()
+        if (label=='acceptable'):
+            expected = "Yes"
+        else:
+            expected = "No"
+            label = "unacceptable"
+        
+        input = essay.replace("\t","")
+        input = input.replace("\n","")
+        ### NOTE: make sure that training instruction is same as testing instr
+        instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
+        output = evaluate(instruction = instruct, input = label_mapper[concept])
+        
+        print("Concept:" + concept + ", Expected:" + expected + ", Model Response:" + output)
 
-def evaluate_prompt_and_instruction(instruction, input):
-    return evaluate(instruction, input)
+        label_list.append(label)
+        if "yes" in output.lower():
+            pred_list.append("acceptable")
+        else: 
+            pred_list.append("unacceptable")
+
+    # free memory
+    del model 
+    return label_list, pred_list
+
+
