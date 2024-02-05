@@ -7,10 +7,12 @@ import torch
 import transformers
 from datasets import load_dataset
 import pandas as pd
+import gc
 
 from sklearn.model_selection import KFold, StratifiedKFold
 from torch.utils.data import Dataset
 from eval_kfolds import eval_with_prompt
+from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support, roc_auc_score, classification_report
 
 # Command line examples
 # maximumn character len is 2200 for the essay dataset
@@ -46,17 +48,19 @@ def train(
     num_epochs: int = 3,
     learning_rate: float = 3e-4,
     cutoff_len: int = 2048,
-    val_set_size: int = 75*4/5, # train test split, total num essays = 75, train
+    val_set_size: int = 0, # we are running our own cross validation
     # lora hyperparams
-    lora_r: int = 16,
+    lora_r: int = 16, # rank of the lora parameters. The smaller lora_r is , the fewer parameters lora has.
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = [
         "q_proj",
         "v_proj",
+        "k_proj",
+        "o_proj"
     ],
     # llm hyperparams
-    train_on_inputs: bool = True,  # if False, masks out inputs in loss
+    train_on_inputs: bool = True,  # if True, model learns to predict the input
     add_eos_token: bool = False,
     group_by_length: bool = False,  # faster, but produces an odd training loss curve
     # wandb params
@@ -271,15 +275,6 @@ def train(
     model.config.use_cache = False
 
     old_state_dict = model.state_dict
-    # model.state_dict = (
-    #     lambda self, *_, **__: get_peft_model_state_dict(
-    #         self, old_state_dict()
-    #     )
-    # ).__get__(model, type(model))
-
-    # if torch.__version__ >= "2" and sys.platform != "win32":
-    #     print("\n ############################ Torch compiling")
-    #     model = torch.compile(model)
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
@@ -287,6 +282,12 @@ def train(
     print(
         "\n If there's a warning about missing keys above, please disregard :)"
     )
+    
+    # free memory 
+    del model, tokenizer, trainer
+    gc.collect() # for python memory management
+    torch.cuda.empty_cache()  # for GPU memory 
+
 
 label_mapper = {"PE":"Potential Energy", "KE":"Kinetic Energy", "LCE":"Law of Conservation of Energy"}
 
@@ -315,11 +316,16 @@ class EssayDatasetWithPrompt(Dataset):
                     fp.write( ",\n")
                 fp.write("{\n")
                 
-                input = essay.replace("\t","")
-                input = input.replace("\n","")
-                instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
+                curr_essay = essay.replace("\t","")
+                curr_essay = curr_essay.replace("\n","")
+                # instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
+                instruct = "You are given the following essay. \'" + curr_essay + \
+                    "\' Does it explain the concept of \'" + label_mapper[self.concept] + \
+                    "\'? Only answer yes or no."
+                
                 fp.write('"instruction": "' + instruct  + '",\n')
                 fp.write('"input": "' + label_mapper[self.concept] + '",\n')
+                # fp.write('"input": "",\n')
 
                 fp.write('"output": "' + label + '"')
                 fp.write("\n}")
@@ -327,7 +333,6 @@ class EssayDatasetWithPrompt(Dataset):
             fp.write("]")
 
     
-# FLAN_T5_training_v3
 def fine_tune_with_prompt(concept, data_df):
     kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42) # reproducibility
 
@@ -352,68 +357,54 @@ def fine_tune_with_prompt(concept, data_df):
         # print(eval_dataset)
 
         model_path = 'models/essay_model_' + concept + "_fold" + str(fold)
+        # model_path = 'models/essay_model_PE_fold0'
 
-        # train(
-        #     # model/data params
-        #     base_model = 'meta-llama/Llama-2-7b-hf',  # the only required argument
-        #     data_path = train_filename,
-        #     output_dir = model_path,
-        #     # training hyperparams
-        #     # num_epochs = 50,
-        #     num_epochs = 2,
-        #     learning_rate = 0.005,
-        #     cutoff_len = 1024,
-        #     val_set_size = 0,
-        #     # lora hyperparams
-        #     lora_target_modules = [
-        #         "q_proj",
-        #         "v_proj",
-        #         "k_proj",
-        #         "o_proj"
-        #     ]
-        # )
-
-        # Prepare the model for prediction
+        train(
+            # model/data params
+            base_model = 'meta-llama/Llama-2-7b-hf',  # the only required argument
+            # base_model = 'meta-llama/Llama-2-7b-chat-hf',  # trying out chat
+            data_path = train_filename,
+            output_dir = model_path,
+            # training hyperparams
+            num_epochs = 50,
+            learning_rate = 0.005,
+            cutoff_len = 1024,
+            val_set_size = 0,
+            # lora hyperparams
+            lora_target_modules = [
+                "q_proj",
+                "v_proj",
+                "k_proj",
+                "o_proj"
+            ]
+        )
+        
+        # make predictions
         label_list, pred_list = eval_with_prompt(concept, eval_dataset, model_path)
+        # exit(0)
 
-        # Get predictions
-        # decoded_labels = [label.strip().lower() for label in data_df.iloc[val_idx][concept]]
-        # decoded_preds = []
-        # for essay in data_df['Essay'].iloc[val_idx].values:
-        #     #prompt = f"According to the following essay, is the student's definition of {concept} Acceptable, Unacceptable, Insufficient, or Not Found? Only use one of these labels for outputs\n{essay}"
-        #     prompt = f"According to the following essay, classify the student's definition of {concept} as {{option_1: Acceptable}}, {{option_2: Unacceptable}}, {{option_3: Insufficient}}, or {{option_4: Not Found}}\n{essay}"
-        #     input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to("cuda")
-        #     if torch.cuda.is_available():
-        #         input_ids = input_ids.to("cuda")
-        #     output = model.generate(input_ids, max_new_tokens=50)
-        #     # for token_id in output[0]:
-        #     #   token = tokenizer.decode(token_id, skip_special_tokens=True)
-        #     #   print(f"Token ID: {token_id}, Token: {token}")
+        print(label_list)
+        print(pred_list)
+        # Calculate and store metrics
+        accuracy = accuracy_score(label_list, pred_list)
+        precision, recall, f1, _ = precision_recall_fscore_support(label_list, pred_list, average='weighted', zero_division=0)
 
-        #     pred_label = tokenizer.decode(output[0], skip_special_tokens=True)
-        #     decoded_preds.append(pred_label)
-        # print(decoded_labels)
-        # print(decoded_preds)
-        # # Calculate and store metrics
-        # accuracy = accuracy_score(decoded_labels, decoded_preds)
-        # precision, recall, f1, _ = precision_recall_fscore_support(decoded_labels, decoded_preds, average='weighted', zero_division=0)
+        fold_metrics["accuracy"].append(accuracy)
+        fold_metrics["precision"].append(precision)
+        fold_metrics["recall"].append(recall)
+        fold_metrics["f1"].append(f1)
 
-        # fold_metrics["accuracy"].append(accuracy)
-        # fold_metrics["precision"].append(precision)
-        # fold_metrics["recall"].append(recall)
-        # fold_metrics["f1"].append(f1)
+        print("Metrics for PE:")
+        print(f"Accuracy: {accuracy}, F1 Score: {f1}")
+        print(f"Precision: {precision}, Recall: {recall}")
+
+        break # finish at 1 fold for now.
 
     # # Compute the average of the metrics across all folds
-    # avg_metrics = {metric: sum(values) / len(values) for metric, values in fold_metrics.items()}
+    avg_metrics = {metric: sum(values) / len(values) for metric, values in fold_metrics.items()}
 
-    # print(f"Average metrics across all folds for {concept}: {avg_metrics}")
-
-    # # Save the model
-    # model_save_path = f'./model_{concept}_trained'
-    # model.save_pretrained(model_save_path)
-    # tokenizer.save_pretrained(model_save_path)
-    # return model_save_path,avg_metrics
-    return None, None
+    return avg_metrics    
+    # exit(0)
 
 def train_kfolds():
     # Standardize the labels and load data
@@ -423,13 +414,13 @@ def train_kfolds():
     data_df["LCE"] = data_df["LCE"].str.lower().str.strip()
 
     # Train the model separately for each concept
-    metrics_PE = fine_tune_with_prompt("PE", data_df)[1]
-    metrics_KE = fine_tune_with_prompt("KE", data_df)[1]
-    metrics_LCE = fine_tune_with_prompt("LCE", data_df)[1]
+    metrics_PE = fine_tune_with_prompt("PE", data_df)
+    metrics_KE = fine_tune_with_prompt("KE", data_df)
+    metrics_LCE = fine_tune_with_prompt("LCE", data_df)
 
-    # print("Average metrics for PE:", metrics_PE)
-    # print("Average metrics for KE:", metrics_KE)
-    # print("Average metrics for LCE:", metrics_LCE)
+    print("Average metrics across all folds for PE:", metrics_PE)
+    print("Average metrics across all folds for KE:", metrics_KE)
+    print("Average metrics across all folds for LCE:", metrics_LCE)
 
 
 if __name__ == "__main__":

@@ -2,8 +2,11 @@
 # With Alpaca-LoRA Fine-Tuning (PEFT method)
 # on prediction of essay understanding of PE,KE,LCE 
 
-### STATUS REPORT: Need to implement same 5fold CV as other models (reproducibility), 
-## continue fine-tuning, create separate models for CU0, CU1, ... CU5.
+### STATUS REPORT: working on prompt engineering for better results.
+## current best model is 50 epochs, learning rate 0.005, train_on_input = False?
+# prompt = instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + curr_essay
+# Input = concept
+
 
 ### File explanations
 1. essay_predict_baseline.py = zeroshot predictions
@@ -20,8 +23,7 @@
 4. test_model.py  (evaluate on the test data)
 
 ### TODO priority: 
-1. Set up reproducible 5Fold Cross Validation
-2. Fine-Tuning (learning rate, epoch) that reduces training loss under 0.1
+1. Fine-Tuning (learning rate, epoch) that reduces training loss under 0.1
    - If training loss continues to decline with 25 epochs, increase epochs. 
    - if training loss fluctuates up and down (check on wandb), reduce learning rate.
 3. Prompt engineering, make sure that training instruction is same as testing
@@ -46,7 +48,7 @@ python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='mod
    + --cutoff_len = cutoff for data
 
 
-##### Fine-tuning ITERATIONS
+##### Fine-tuning ITERATIONS, chose higher # epochs, higher learning rate because small dataset.
 ## 1/29 train with 65 epochs, adjust learning rate: 
 # 65 epochs may be too overfitting
 python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model14' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 

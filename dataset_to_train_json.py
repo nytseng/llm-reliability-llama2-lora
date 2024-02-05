@@ -13,29 +13,27 @@ input_examples = dataset["Essay"]
 #     fp.write("[\n")
 #     fp.close()
 
-num_row = 0
-with open('train_data2.json', 'a') as fp:
-    fp.write("[")
-    for row in range(len(dataset)):
-        if (row % 10 < 8) : # sample 80% of examples for training
-            for i, label in enumerate(labels):
-                if (num_row > 0): #newline for 2nd example
-                    fp.write( ",\n")
-                fp.write("{\n")
-                input = dataset["Essay"][row]
-                input = input.replace("\n","")
-                input = input.replace("\t","")
-                instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
-                fp.write('"instruction": "' + instruct  + '",\n')
-                
-                fp.write('"input": "' + label + '",\n')
-                output = dataset[label_col_names[i]][row]
-                if output.lower() == "acceptable":
-                    output = "Yes"
-                else:
-                    output = "No"
-                fp.write('"output": "' + output + '"')
-                fp.write("\n}")
-                num_row = num_row + 1
-    
-    fp.write("]")
+for i, label in enumerate(labels):
+    with open('train_data_'+label_col_names[i]+'.json', 'w') as fp:
+        fp.write("[")
+        num_row = 0
+        for row in range(len(dataset)):
+            if (num_row > 0): #newline for 2nd example
+                fp.write( ",\n")
+            fp.write("{\n")
+            input = dataset["Essay"][row]
+            input = input.replace("\n","")
+            input = input.replace("\t","")
+            instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
+            fp.write('"instruction": "' + instruct  + '",\n')
+            
+            fp.write('"input": "' + label + '",\n')
+            output = dataset[label_col_names[i]][row]
+            if output.lower() == "acceptable":
+                output = "Yes"
+            else:
+                output = "No"
+            fp.write('"output": "' + output + '"')
+            fp.write("\n}")
+            num_row = num_row + 1
+        fp.write("]")

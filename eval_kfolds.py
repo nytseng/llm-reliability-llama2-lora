@@ -5,7 +5,7 @@ import gradio as gr
 import re
 import pandas
 import csv
-
+import gc
 
 assert (
     "LlamaTokenizer" in transformers._import_structure["models.llama"]
@@ -135,7 +135,6 @@ def generate_prompt(instruction, input=None):
 ### Response:"""
 
 
-
 def evaluate(
     instruction,
     input=None,
@@ -204,22 +203,33 @@ def eval_with_prompt(concept, essay_struct, model_path):
             expected = "No"
             label = "unacceptable"
         
-        input = essay.replace("\t","")
-        input = input.replace("\n","")
+        curr_essay = essay.replace("\t","")
+        curr_essay = curr_essay.replace("\n","")
         ### NOTE: make sure that training instruction is same as testing instr
-        instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
-        output = evaluate(instruction = instruct, input = label_mapper[concept])
+        # instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + curr_essay # input here is essay
         
+        instruct = "You are given the following essay. \'" + curr_essay + \
+            "\' Does it explain the concept from the input" + \
+            "\'? Only answer yes or no."
+       
+        output = evaluate(instruction = instruct, input = label_mapper[concept])
+        # output = evaluate(instruction = instruct, input = "")
+        # print("instruct = " + instruct)
+        # print("label_mapper[concept] = " + label_mapper[concept])
         print("Concept:" + concept + ", Expected:" + expected + ", Model Response:" + output)
+        # exit()
 
         label_list.append(label)
-        if "yes" in output.lower():
+        if "yes" in output.lower() and len(output.split()) < 5: # in case that the output contains "yes" from input
             pred_list.append("acceptable")
         else: 
             pred_list.append("unacceptable")
 
     # free memory
-    del model 
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+
     return label_list, pred_list
 
 
