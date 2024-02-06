@@ -1,43 +1,19 @@
 # Llama 2 7b Base Model
-# With Alpaca-LoRA Fine-Tuning (PEFT method)
-# on prediction of essay understanding of PE,KE,LCE 
+With Alpaca-LoRA Fine-Tuning (PEFT method)
+on prediction of essay understanding of PE,KE,LCE 
 
 ### STATUS REPORT: working on prompt engineering for better results.
 ## current best model is 50 epochs, learning rate 0.005, train_on_input = False?
-# prompt = instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + curr_essay
-# Input = concept
-
+prompt:
+   instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + curr_essay
+   input = concept
 
 ### File explanations
 1. essay_predict_baseline.py = zeroshot predictions
-2. split_dataset.py = split training and testing data to csv for reproducibility and testing.
-3. dataset_to_train_json.py = turns training data into json of instructions
-3. train_model.py = fine-tuned model training
-4. test_model.py = testing
-5. f1_score_baseline/finetuned.txt = calculate metrics
-
-### Fine-Tuning Walkthrough:
-1. split_dataset.py (train test split)
-2. dataset_to_train_json.py (puts training data into instructions to run)
-3. train_model.py (fine tuning models)
-4. test_model.py  (evaluate on the test data)
-
-### TODO priority: 
-1. Fine-Tuning (learning rate, epoch) that reduces training loss under 0.1
-   - If training loss continues to decline with 25 epochs, increase epochs. 
-   - if training loss fluctuates up and down (check on wandb), reduce learning rate.
-3. Prompt engineering, make sure that training instruction is same as testing
-
-
-### TODO priority: 
-4. Set up git repository, makes things easier
-5. clean up code, comment documentation
-6. move code into jupyter notebook
-
+2. train_eval_kfold.py = fine-tuned model training and eval
+3. eval_kfolds.py = eval code
 
 ### Training/Finetuning Models
-# sample command in terminal:
-python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model14' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=2048
 # parameters explained: 
    + --output_dir saves new fine-tuned model
    + --num_epochs = iterations model learns from data
@@ -47,12 +23,12 @@ python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='mod
    + --learning_rate = step size to minimize loss 
    + --cutoff_len = cutoff for data
 
+### TODO priority: 
+1. Fine-Tuning aim to reduce training loss under 0.1
+   - If training loss continues to decline with 25 epochs, increase epochs. 
+   - if training loss fluctuates up and down (on wandb), reduce learning rate.
+3. Prompt engineering, (make sure that training instruction is same as testing)
 
-##### Fine-tuning ITERATIONS, chose higher # epochs, higher learning rate because small dataset.
-## 1/29 train with 65 epochs, adjust learning rate: 
-# 65 epochs may be too overfitting
-python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model14' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 
-; python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model15' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.004 --cutoff_len=1000 
-; python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model16' --num_epochs=65 --data_path='train_data2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.006 --cutoff_len=1000 
-
-## after 50 epochs, training loss is stable
+### TODO: 
+5. clean up code, comment documentation
+6. move code into jupyter notebook

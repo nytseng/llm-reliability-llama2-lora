@@ -50,9 +50,9 @@ def train(
     cutoff_len: int = 2048,
     val_set_size: int = 0, # we are running our own cross validation
     # lora hyperparams
-    lora_r: int = 16, # rank of the lora parameters. The smaller lora_r is , the fewer parameters lora has.
-    lora_alpha: int = 16,
-    lora_dropout: float = 0.05,
+    lora_r: int = 4, # rank of the lora parameters. The smaller lora_r is, the fewer parameters lora has.
+    lora_alpha: int = 8,
+    lora_dropout: float = 0.05, # dropout probability for LoRA layers to prevent 
     lora_target_modules: List[str] = [
         "q_proj",
         "v_proj",
@@ -371,7 +371,7 @@ def fine_tune_with_prompt(concept, data_df):
             cutoff_len = 1024,
             val_set_size = 0,
             # lora hyperparams
-            lora_target_modules = [
+            lora_target_modules = [ # linear layers 
                 "q_proj",
                 "v_proj",
                 "k_proj",
@@ -398,7 +398,7 @@ def fine_tune_with_prompt(concept, data_df):
         print(f"Accuracy: {accuracy}, F1 Score: {f1}")
         print(f"Precision: {precision}, Recall: {recall}")
 
-        break # finish at 1 fold for now.
+        # break # finish at 1 fold for now.
 
     # # Compute the average of the metrics across all folds
     avg_metrics = {metric: sum(values) / len(values) for metric, values in fold_metrics.items()}
