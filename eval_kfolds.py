@@ -142,7 +142,7 @@ def evaluate(
     top_p=0.75,
     top_k=40,
     num_beams=4,
-    max_new_tokens=15,
+    max_new_tokens=4, # max output tokens, only needs yes/no. this speeds up runtime
     **kwargs,
 ):
     with torch.autocast("cuda"):
@@ -208,9 +208,10 @@ def eval_with_prompt(concept, essay_struct, model_path):
         ### NOTE: make sure that training instruction is same as testing instr
         # instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + curr_essay # input here is essay
         
-        instruct = "You are given the following essay. \'" + curr_essay + \
-            "\' Does it explain the concept from the input" + \
-            "\'? Only answer yes or no."
+        instruct = "You are a junior high school teacher grading the answers for a Physics " + \
+                     "test. You are given a paragraph written by a student to describe a physics concept. " + \
+                     "Please say Yes if it defines the concept at the input correctly, otherwise say No. " + \
+                     "Here is the student paragraph: \'" + curr_essay + "\'"  
        
         output = evaluate(instruction = instruct, input = label_mapper[concept])
         # output = evaluate(instruction = instruct, input = "")

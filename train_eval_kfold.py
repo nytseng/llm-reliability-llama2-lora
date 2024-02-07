@@ -8,6 +8,7 @@ import transformers
 from datasets import load_dataset
 import pandas as pd
 import gc
+import numpy as np
 
 from sklearn.model_selection import KFold, StratifiedKFold
 from torch.utils.data import Dataset
@@ -36,11 +37,21 @@ from peft import (
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from utils.prompter import Prompter
 
+def compute_metrics(results):    
+    label_list = results.label_ids
+    pred_list = np.argmax(results.predictions, axis=-1)
+
+    # Calculate and store metrics
+    accuracy = accuracy_score(label_list, pred_list)
+    precision, recall, f1, _ = precision_recall_fscore_support(label_list, pred_list, average='weighted', zero_division=0)
+    return {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
+
 
 def train(
     # model/data params
     base_model: str = "",  # the only required argument
     data_path: str = "yahma/alpaca-cleaned",
+    val_data_path: str = "",
     output_dir: str = "./lora-alpaca",
     # training hyperparams
     batch_size: int = 128,
@@ -202,6 +213,11 @@ def train(
     else:
         data = load_dataset(data_path)
 
+    if val_data_path.endswith(".json") or val_data_path.endswith(".jsonl"):
+        validate_data = load_dataset("json", data_files=val_data_path)
+    else:
+        validate_data = load_dataset(val_data_path)
+
     if resume_from_checkpoint:
         # Check the available weights and load them
         checkpoint_name = os.path.join(
@@ -234,20 +250,29 @@ def train(
         val_data = (
             train_val["test"].shuffle().map(generate_and_tokenize_prompt)
         )
-    else:
+    else: # validation by given test set
         train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
-        val_data = None
-        # early stopping
+        if val_data_path != "":
+            print("validate_date[train] length: " + str(validate_data["train"].num_rows))
+            val_data = (
+                validate_data["train"].shuffle().map(generate_and_tokenize_prompt)
+            )
+        else:
+            val_data = None
 
     if not ddp and torch.cuda.device_count() > 1:
         # keeps Trainer from trying its own DataParallelism when more than 1 gpu is available
         model.is_parallelizable = True
         model.model_parallel = True
 
+    require_eval = (val_set_size > 0 or val_data_path != "")
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_data,
         eval_dataset=val_data,
+        compute_metrics=compute_metrics,
+        callbacks = [transformers.EarlyStoppingCallback(early_stopping_patience=5)],
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -255,15 +280,16 @@ def train(
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=True,
-            logging_steps=10,
+            logging_steps=1, # shows loss/learning rate per step
             optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
-            save_strategy="steps",
-            eval_steps=200 if val_set_size > 0 else None,
-            save_steps=200,
+            evaluation_strategy="epoch" if require_eval else "no",
+            save_strategy="epoch",
+            eval_steps=5 if require_eval else None,
+            save_steps=5 if require_eval else None,
             output_dir=output_dir,
             save_total_limit=3,
-            load_best_model_at_end=True if val_set_size > 0 else False,
+            load_best_model_at_end=True if require_eval else False,
+            metric_for_best_model = 'f1',
             ddp_find_unused_parameters=False if ddp else None,
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else None,
@@ -320,10 +346,16 @@ class EssayDatasetWithPrompt(Dataset):
                 curr_essay = essay.replace("\t","")
                 curr_essay = curr_essay.replace("\n","")
                 # instruct = "Does the following essay explain the concept from the input correctly? Yes or no. " + input
-                instruct = "You are given the following essay. \'" + curr_essay + \
-                    "\' Does it explain the concept of \'" + label_mapper[self.concept] + \
-                    "\'? Only answer yes or no."
                 
+                # instruct = "You are given the following essay. \'" + curr_essay + \
+                #     "\' Does it explain the concept of \'" + label_mapper[self.concept] + \
+                #     "\'? Only answer yes or no."
+                
+                instruct = "You are a junior high school teacher grading the answers for a Physics " + \
+                     "test. You are given a paragraph written by a student to describe a physics concept. " + \
+                     "Please say Yes if it defines the concept at the input correctly, otherwise say No. " + \
+                     "Here is the student paragraph: \'" + curr_essay + "\'"  
+
                 fp.write('"instruction": "' + instruct  + '",\n')
                 fp.write('"input": "' + label_mapper[self.concept] + '",\n')
                 # fp.write('"input": "",\n')
@@ -353,22 +385,21 @@ def fine_tune_with_prompt(concept, data_df):
         train_filename = "training_data/train_examples_" + concept + "_fold" + str(fold) + ".json"
         train_dataset.write(train_filename)
         eval_dataset = EssayDatasetWithPrompt(data_df['Essay'].iloc[val_idx].values, concept, data_df[concept].iloc[val_idx].values)
-
-        # print(data_df['Essay'].iloc[train_idx].values)
-        # print(eval_dataset)
+        eval_filename = "training_data/validate_examples_" + concept + "_fold" + str(fold) + ".json"
+        eval_dataset.write(eval_filename)
 
         model_path = 'models/essay_model_' + concept + "_fold" + str(fold)
-        # model_path = 'models/essay_model_PE_fold0'
 
         train(
             # model/data params
             base_model = 'meta-llama/Llama-2-7b-hf',  # the only required argument
             # base_model = 'meta-llama/Llama-2-7b-chat-hf',  # trying out chat
             data_path = train_filename,
+            val_data_path = eval_filename,
             output_dir = model_path,
             # training hyperparams
-            num_epochs = 60,
-            learning_rate = 0.004,
+            num_epochs = 50,
+            learning_rate = 0.005,
             cutoff_len = 1024,
             val_set_size = 0,
             # lora hyperparams
@@ -399,7 +430,7 @@ def fine_tune_with_prompt(concept, data_df):
         print(f"Accuracy: {accuracy}, F1 Score: {f1}")
         print(f"Precision: {precision}, Recall: {recall}")
 
-        # break # finish at 1 fold for now.
+        break # finish at 1 fold for now.
 
     # # Compute the average of the metrics across all folds
     avg_metrics = {metric: sum(values) / len(values) for metric, values in fold_metrics.items()}
