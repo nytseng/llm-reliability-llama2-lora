@@ -237,6 +237,7 @@ def train(
     else:
         train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
         val_data = None
+        # early stopping
 
     if not ddp and torch.cuda.device_count() > 1:
         # keeps Trainer from trying its own DataParallelism when more than 1 gpu is available
@@ -366,8 +367,8 @@ def fine_tune_with_prompt(concept, data_df):
             data_path = train_filename,
             output_dir = model_path,
             # training hyperparams
-            num_epochs = 50,
-            learning_rate = 0.005,
+            num_epochs = 60,
+            learning_rate = 0.004,
             cutoff_len = 1024,
             val_set_size = 0,
             # lora hyperparams
