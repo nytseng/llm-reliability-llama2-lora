@@ -5,7 +5,7 @@ from typing import List
 import fire
 import torch
 import transformers
-from datasets import load_dataset
+from datasets import load_dataset, load_metric
 import pandas as pd
 import gc
 import numpy as np
@@ -16,7 +16,7 @@ from eval_kfolds import eval_with_prompt
 from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support, roc_auc_score, classification_report
 
 # Command line examples
-# maximumn character len is 2200 for the essay dataset
+# maximum character len is 2200 for the essay dataset
 # use model11: python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model11' --num_epochs=65 --data_path='essay_train_examples2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 
 
 # python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model13' --num_epochs=65 --data_path='essay_train_examples2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 
@@ -37,16 +37,56 @@ from peft import (
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from utils.prompter import Prompter
 
-def compute_metrics(results):    
-    label_list = results.label_ids
-    pred_list = np.argmax(results.predictions, axis=-1)
+def accuracy(predictions, references, normalize=True, sample_weight=None):
+    return {
+        "accuracy": float(
+            accuracy_score(references, predictions, normalize=normalize, sample_weight=sample_weight)
+        )
+    }
+
+metric = load_metric("accuracy")
+global_tokenizer = None
+
+def compute_metrics(results):     
+    global global_tokenizer
+
+    label_tok_list = results.label_ids
+    pred_tok_list = np.argmax(results.predictions, axis=-1)
+    # print("pred_list = ")
+    # print(pred_list.shape)
+    # print(np.matrix(pred_list))
+
+    # print("label_list =")
+    # print(label_list.shape)
+    # print(np.matrix(label_list))
+    label_list = []
+    pred_list = []
+    for row in pred_tok_list:
+        output = global_tokenizer.decode(row)
+        token_list = output.split("### Response:")
+        if len(token_list) < 2: # failure to predict
+            answer = "no"
+        else: 
+            if "yes" in token_list[1].lower(): # in case that the output contains "yes" from input
+                answer = "yes"
+            else: 
+                answer = "no"
+        pred_list.append(answer)
+    print("predict = ")
+    print(pred_list)    
+    for row in label_tok_list:
+        output = global_tokenizer.decode(row[row > 0])
+        answer = output.split("### Response:")[1].lower().replace("</s>", "").replace("<s>", "").replace("\n", "").strip()
+        label_list.append(answer)
+    print("label = ")
+    print(label_list)
 
     # Calculate and store metrics
     accuracy = accuracy_score(label_list, pred_list)
     precision, recall, f1, _ = precision_recall_fscore_support(label_list, pred_list, average='weighted', zero_division=0)
     return {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
 
-
+   
 def train(
     # model/data params
     base_model: str = "",  # the only required argument
@@ -140,8 +180,10 @@ def train(
         torch_dtype=torch.float16,
         device_map=device_map,
     )
+    global global_tokenizer
 
     tokenizer = LlamaTokenizer.from_pretrained(base_model)
+    global_tokenizer = tokenizer
 
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
@@ -255,7 +297,7 @@ def train(
         if val_data_path != "":
             print("validate_date[train] length: " + str(validate_data["train"].num_rows))
             val_data = (
-                validate_data["train"].shuffle().map(generate_and_tokenize_prompt)
+                validate_data["train"].map(generate_and_tokenize_prompt)
             )
         else:
             val_data = None
@@ -272,7 +314,7 @@ def train(
         train_dataset=train_data,
         eval_dataset=val_data,
         compute_metrics=compute_metrics,
-        callbacks = [transformers.EarlyStoppingCallback(early_stopping_patience=5)],
+        callbacks = [transformers.EarlyStoppingCallback(early_stopping_patience=5)], # early stop
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -310,10 +352,14 @@ def train(
         "\n If there's a warning about missing keys above, please disregard :)"
     )
     
+    best_checkpoint_path = trainer.state.best_model_checkpoint
+
     # free memory 
     del model, tokenizer, trainer
     gc.collect() # for python memory management
     torch.cuda.empty_cache()  # for GPU memory 
+
+    return best_checkpoint_path
 
 
 label_mapper = {"PE":"Potential Energy", "KE":"Kinetic Energy", "LCE":"Law of Conservation of Energy"}
@@ -390,7 +436,7 @@ def fine_tune_with_prompt(concept, data_df):
 
         model_path = 'models/essay_model_' + concept + "_fold" + str(fold)
 
-        train(
+        best_ckpt_path = train(
             # model/data params
             base_model = 'meta-llama/Llama-2-7b-hf',  # the only required argument
             # base_model = 'meta-llama/Llama-2-7b-chat-hf',  # trying out chat
@@ -410,10 +456,10 @@ def fine_tune_with_prompt(concept, data_df):
                 "o_proj"
             ]
         )
-        
+
+        print("best checkpoint = " + best_ckpt_path)
         # make predictions
-        label_list, pred_list = eval_with_prompt(concept, eval_dataset, model_path)
-        # exit(0)
+        label_list, pred_list = eval_with_prompt(concept, eval_dataset, best_ckpt_path)
 
         print(label_list)
         print(pred_list)

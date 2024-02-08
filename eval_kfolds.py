@@ -190,7 +190,6 @@ def eval_with_prompt(concept, essay_struct, model_path):
     if torch.__version__ >= "2":
         model = torch.compile(model)
 
-
     # print(essay_struct.essays)
     
     pred_list = [] # predictions
