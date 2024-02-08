@@ -216,14 +216,18 @@ def eval_with_prompt(concept, essay_struct, model_path):
         # output = evaluate(instruction = instruct, input = "")
         # print("instruct = " + instruct)
         # print("label_mapper[concept] = " + label_mapper[concept])
-        print("Concept:" + concept + ", Expected:" + expected + ", Model Response:" + output)
         # exit()
+        print("Concept:" + concept + ", Expected:" + expected + ", Model Response:" + output)
 
         label_list.append(label)
         if "yes" in output.lower() and len(output.split()) < 5: # in case that the output contains "yes" from input
             pred_list.append("acceptable")
+            print("Model Response: yes")
+
         else: 
             pred_list.append("unacceptable")
+            print("Model Response: no")
+
 
     # free memory
     del model

@@ -49,35 +49,38 @@ global_tokenizer = None
 
 def compute_metrics(results):     
     global global_tokenizer
-
     label_tok_list = results.label_ids
     pred_tok_list = np.argmax(results.predictions, axis=-1)
-    # print("pred_list = ")
-    # print(pred_list.shape)
-    # print(np.matrix(pred_list))
-
-    # print("label_list =")
-    # print(label_list.shape)
-    # print(np.matrix(label_list))
     label_list = []
     pred_list = []
     for row in pred_tok_list:
         output = global_tokenizer.decode(row)
         token_list = output.split("### Response:")
         if len(token_list) < 2: # failure to predict
-            answer = "no"
+            answer = "fail"
         else: 
             if "yes" in token_list[1].lower(): # in case that the output contains "yes" from input
                 answer = "yes"
-            else: 
+            elif "no" in token_list[1].lower(): 
                 answer = "no"
+            else:
+                answer = "fail"
         pred_list.append(answer)
     print("predict = ")
     print(pred_list)    
-    for row in label_tok_list:
+    for row_id in range(len(label_tok_list)):
+        row = label_tok_list[row_id]
         output = global_tokenizer.decode(row[row > 0])
         answer = output.split("### Response:")[1].lower().replace("</s>", "").replace("<s>", "").replace("\n", "").strip()
         label_list.append(answer)
+        # convert fail case into opposite of truth label
+        if pred_list[row_id] == "fail":
+            if answer == "yes":
+                pred_list[row_id] = "no"
+            else:
+                pred_list[row_id] = "yes"
+    print("pred_list corrected = ")
+    print(pred_list)
     print("label = ")
     print(label_list)
 
