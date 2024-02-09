@@ -37,6 +37,31 @@ from peft import (
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from utils.prompter import Prompter
 
+def edit_distance(str1, str2):  
+    m, n = len(str1), len(str2)  
+    dp = [[0] * (n + 1) for _ in range(m + 1)]  
+    for i in range(m + 1):  
+        for j in range(n + 1):  
+            if i == 0:  
+                dp[i][j] = j  
+            elif j == 0:  
+                dp[i][j] = i  
+            elif str1[i - 1] == str2[j - 1]:  
+                dp[i][j] = dp[i - 1][j - 1]  
+            else:  
+                dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])  
+  
+    return dp[m][n]  
+
+
+log_file_ptr = None
+def create_log(file_name):
+    global curr_epoch
+    global log_file_ptr
+    curr_epoch = 0
+    log_file_ptr = open(file_name, 'w')
+
+
 def accuracy(predictions, references, normalize=True, sample_weight=None):
     return {
         "accuracy": float(
@@ -46,15 +71,24 @@ def accuracy(predictions, references, normalize=True, sample_weight=None):
 
 metric = load_metric("accuracy")
 global_tokenizer = None
+curr_epoch = 0
 
-def compute_metrics(results):     
+def compute_metrics(results):  
+    global curr_epoch
+    global log_file_ptr   
     global global_tokenizer
     label_tok_list = results.label_ids
     pred_tok_list = np.argmax(results.predictions, axis=-1)
     label_list = []
     pred_list = []
-    for row in pred_tok_list:
-        output = global_tokenizer.decode(row)
+    curr_epoch += 1
+    
+    pred_output_list = []
+    for row_id in range(len(pred_tok_list)):
+        output = global_tokenizer.decode(pred_tok_list[row_id]).replace("<s>", "").replace("<unk>", "").replace("</s>", "")
+        log_file_ptr.write("curr_epoch " + str(curr_epoch) + "\npred row " + str(row_id) + "\n" + output + "\n") # debugging w/ output
+        pred_output_list.append(output)
+
         token_list = output.split("### Response:")
         if len(token_list) < 2: # failure to predict
             answer = "fail"
@@ -66,11 +100,18 @@ def compute_metrics(results):
             else:
                 answer = "fail"
         pred_list.append(answer)
-    print("predict = ")
-    print(pred_list)    
+    # print("predict = ")
+    # print(pred_list)    
     for row_id in range(len(label_tok_list)):
         row = label_tok_list[row_id]
-        output = global_tokenizer.decode(row[row > 0])
+        output = global_tokenizer.decode(row[row > 0]).replace("<s>", "").replace("<unk>", "").replace("</s>", "")
+        log_file_ptr.write("curr_epoch = " + str(curr_epoch) + "\nlabel row " + str(row_id) + "\n" + output + "\n") # debugging w/ output
+        edit_len = edit_distance(pred_output_list[row_id], output)
+        log_file_ptr.write("edit distance = " + str(edit_len) + "\n")
+        # failure when edit length too high
+        if (edit_len > 400):
+            pred_list[row_id] = "fail"
+
         answer = output.split("### Response:")[1].lower().replace("</s>", "").replace("<s>", "").replace("\n", "").strip()
         label_list.append(answer)
         # convert fail case into opposite of truth label
@@ -79,10 +120,10 @@ def compute_metrics(results):
                 pred_list[row_id] = "no"
             else:
                 pred_list[row_id] = "yes"
-    print("pred_list corrected = ")
-    print(pred_list)
-    print("label = ")
-    print(label_list)
+    # print("pred_list corrected = ")
+    # print(pred_list)
+    # print("label = ")
+    # print(label_list)
 
     # Calculate and store metrics
     accuracy = accuracy_score(label_list, pred_list)
@@ -127,29 +168,29 @@ def train(
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
-            f"Training Alpaca-LoRA model with params:\n"
-            f"base_model: {base_model}\n"
-            f"data_path: {data_path}\n"
-            f"output_dir: {output_dir}\n"
-            f"batch_size: {batch_size}\n"
-            f"micro_batch_size: {micro_batch_size}\n"
-            f"num_epochs: {num_epochs}\n"
-            f"learning_rate: {learning_rate}\n"
-            f"cutoff_len: {cutoff_len}\n"
-            f"val_set_size: {val_set_size}\n"
-            f"lora_r: {lora_r}\n"
-            f"lora_alpha: {lora_alpha}\n"
-            f"lora_dropout: {lora_dropout}\n"
-            f"lora_target_modules: {lora_target_modules}\n"
-            f"train_on_inputs: {train_on_inputs}\n"
-            f"add_eos_token: {add_eos_token}\n"
-            f"group_by_length: {group_by_length}\n"
-            f"wandb_project: {wandb_project}\n"
-            f"wandb_run_name: {wandb_run_name}\n"
-            f"wandb_watch: {wandb_watch}\n"
-            f"wandb_log_model: {wandb_log_model}\n"
-            f"resume_from_checkpoint: {resume_from_checkpoint or False}\n"
-            f"prompt template: {prompt_template_name}\n"
+            # f"Training Alpaca-LoRA model with params:\n"
+            # f"base_model: {base_model}\n"
+            # f"data_path: {data_path}\n"
+            # f"output_dir: {output_dir}\n"
+            # f"batch_size: {batch_size}\n"
+            # f"micro_batch_size: {micro_batch_size}\n"
+            # f"num_epochs: {num_epochs}\n"
+            # f"learning_rate: {learning_rate}\n"
+            # f"cutoff_len: {cutoff_len}\n"
+            # f"val_set_size: {val_set_size}\n"
+            # f"lora_r: {lora_r}\n"
+            # f"lora_alpha: {lora_alpha}\n"
+            # f"lora_dropout: {lora_dropout}\n"
+            # f"lora_target_modules: {lora_target_modules}\n"
+            # f"train_on_inputs: {train_on_inputs}\n"
+            # f"add_eos_token: {add_eos_token}\n"
+            # f"group_by_length: {group_by_length}\n"
+            # f"wandb_project: {wandb_project}\n"
+            # f"wandb_run_name: {wandb_run_name}\n"
+            # f"wandb_watch: {wandb_watch}\n"
+            # f"wandb_log_model: {wandb_log_model}\n"
+            # f"resume_from_checkpoint: {resume_from_checkpoint or False}\n"
+            # f"prompt template: {prompt_template_name}\n"
         )
     assert (
         base_model
@@ -317,7 +358,7 @@ def train(
         train_dataset=train_data,
         eval_dataset=val_data,
         compute_metrics=compute_metrics,
-        callbacks = [transformers.EarlyStoppingCallback(early_stopping_patience=5)], # early stop
+        callbacks = [transformers.EarlyStoppingCallback(early_stopping_patience=15)], # early stop
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -438,6 +479,10 @@ def fine_tune_with_prompt(concept, data_df):
         eval_dataset.write(eval_filename)
 
         model_path = 'models/essay_model_' + concept + "_fold" + str(fold)
+        log_file_name = "logs/" + concept + "_fold" + str(fold) + ".log"
+
+        create_log(log_file_name)
+
 
         best_ckpt_path = train(
             # model/data params
@@ -464,8 +509,8 @@ def fine_tune_with_prompt(concept, data_df):
         # make predictions
         label_list, pred_list = eval_with_prompt(concept, eval_dataset, best_ckpt_path)
 
-        print(label_list)
-        print(pred_list)
+        # print(label_list)
+        # print(pred_list)
         # Calculate and store metrics
         accuracy = accuracy_score(label_list, pred_list)
         precision, recall, f1, _ = precision_recall_fscore_support(label_list, pred_list, average='weighted', zero_division=0)
@@ -479,7 +524,7 @@ def fine_tune_with_prompt(concept, data_df):
         print(f"Accuracy: {accuracy}, F1 Score: {f1}")
         print(f"Precision: {precision}, Recall: {recall}")
 
-        break # finish at 1 fold for now.
+        # break # finish at 1 fold for now.
 
     # # Compute the average of the metrics across all folds
     avg_metrics = {metric: sum(values) / len(values) for metric, values in fold_metrics.items()}
