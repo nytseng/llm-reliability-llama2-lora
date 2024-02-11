@@ -109,7 +109,7 @@ def compute_metrics(results):
         edit_len = edit_distance(pred_output_list[row_id], output)
         log_file_ptr.write("edit distance = " + str(edit_len) + "\n")
         # failure when edit length too high
-        if (edit_len > 400):
+        if (edit_len > 300):
             pred_list[row_id] = "fail"
 
         answer = output.split("### Response:")[1].lower().replace("</s>", "").replace("<s>", "").replace("\n", "").strip()
@@ -155,7 +155,7 @@ def train(
         "o_proj"
     ],
     # llm hyperparams
-    train_on_inputs: bool = True,  # if True, model learns to predict the input
+    train_on_inputs: bool = False,  # if True, model learns to predict the input
     add_eos_token: bool = False,
     group_by_length: bool = False,  # faster, but produces an odd training loss curve
     # wandb params
@@ -357,7 +357,7 @@ def train(
         model=model,
         train_dataset=train_data,
         eval_dataset=val_data,
-        compute_metrics=compute_metrics,
+        compute_metrics=None,
         callbacks = [transformers.EarlyStoppingCallback(early_stopping_patience=15)], # early stop
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
@@ -373,9 +373,9 @@ def train(
             eval_steps=5 if require_eval else None,
             save_steps=5 if require_eval else None,
             output_dir=output_dir,
-            save_total_limit=3,
+            save_total_limit=5,
             load_best_model_at_end=True if require_eval else False,
-            metric_for_best_model = 'f1',
+            metric_for_best_model = 'loss',
             ddp_find_unused_parameters=False if ddp else None,
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else None,
@@ -493,7 +493,7 @@ def fine_tune_with_prompt(concept, data_df):
             output_dir = model_path,
             # training hyperparams
             num_epochs = 50,
-            learning_rate = 0.005,
+            learning_rate = 0.008,
             cutoff_len = 1024,
             val_set_size = 0,
             # lora hyperparams
@@ -535,14 +535,14 @@ def fine_tune_with_prompt(concept, data_df):
 def train_kfolds():
     # Standardize the labels and load data
     data_df = pd.read_excel("Student Essays Final Annotations.xlsx")
-    data_df["PE"] = data_df["PE"].str.lower().str.strip()
-    data_df["KE"] = data_df["KE"].str.lower().str.strip()
     data_df["LCE"] = data_df["LCE"].str.lower().str.strip()
+    data_df["KE"] = data_df["KE"].str.lower().str.strip()
+    data_df["PE"] = data_df["PE"].str.lower().str.strip()
 
     # Train the model separately for each concept
-    metrics_PE = fine_tune_with_prompt("PE", data_df)
-    metrics_KE = fine_tune_with_prompt("KE", data_df)
     metrics_LCE = fine_tune_with_prompt("LCE", data_df)
+    metrics_KE = fine_tune_with_prompt("KE", data_df)
+    metrics_PE = fine_tune_with_prompt("PE", data_df)
 
     print("Average metrics across all folds for PE:", metrics_PE)
     print("Average metrics across all folds for KE:", metrics_KE)
