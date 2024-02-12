@@ -13,7 +13,6 @@ assert (
 from transformers import LlamaTokenizer, LlamaForCausalLM, GenerationConfig
 
 BASE_MODEL = "meta-llama/Llama-2-7b-hf"
-LORA_WEIGHTS = "models/essay_model14"
 
 tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
 
@@ -29,96 +28,6 @@ except:
     pass
 
 model = None
-
-# if device == "cuda":
-#     model = LlamaForCausalLM.from_pretrained(
-#         BASE_MODEL,
-#         load_in_8bit=False,
-#         torch_dtype=torch.float16,
-#         device_map="auto",
-#     )
-#     model = PeftModel.from_pretrained(
-#         model, LORA_WEIGHTS, torch_dtype=torch.float16, force_download=True, 
-#     )
-# elif device == "mps":
-#     model = LlamaForCausalLM.from_pretrained(
-#         BASE_MODEL,
-#         device_map={"": device},
-#         torch_dtype=torch.float16,
-#     )
-#     model = PeftModel.from_pretrained(
-#         model,
-#         LORA_WEIGHTS,
-#         device_map={"": device},
-#         torch_dtype=torch.float16,
-#     )
-# else:
-#     model = LlamaForCausalLM.from_pretrained(
-#         BASE_MODEL, device_map={"": device}, low_cpu_mem_usage=True
-#     )
-#     model = PeftModel.from_pretrained(
-#         model,
-#         LORA_WEIGHTS,
-#         device_map={"": device},
-#     )
-
-def remove_unwanted_symbols(s):
-    new_column = ""
-    for c in s:
-        if c.isalnum() or c.isspace() or c=='_' or c==',' or c=='=' or c=="." \
-                or c=='<' or c=='>' or c=="'" or c=="(" or c==")" or c=="*" or c=="!" \
-                or c=='-' or c=='%' or c=='/' or c=='[' or c==']':
-            new_column += c
-        else:
-            #print("stop")
-            #print(c)
-            break
-    return new_column
-
-def translate(s):
-    column = s
-    # trimming unneeded content
-    if '+' in column:
-        column = column.split('+')[0]
-    # if '⁇' in column:
-    #     column = column.split('⁇')[0]
-    column = remove_unwanted_symbols(column)
-
-    #direct replacement
-    column = column.replace("trim_vendor_item","TrimVenItem")
-    column = column.replace("trim_vendor_item","TrimVenItem")
-    column = column.replace("source_vendor_item", "SrcVenItem")
-    column = column.replace("medline_suggested_substitute", "Medline Suggested Sub")
-    column = column.replace("parent_monthly_inventory_on_hand", "Parent MIOH")
-    column = column.replace("invoice_paid_total", "InvcPaidTotal")
-    # table rename
-    column = column.replace("Purchase_Order_System", "POS")
-    column = column.replace("Potential_Back_Order","PBO_Sam_PVA")
-    column = column.replace("Supply_Items_At_Risk", "SupplyItemsAtRisk")
-    column = column.replace("Purchase_Order_Receipts", "Receipts")
-
-    #indirect replacement
-    column = column.replace("source","src")
-    column = column.replace("purchase_order","PO")
-    column = column.replace("account","acct")
-    column = column.replace("description","desc")
-    column = column.replace("vendor", "vend")
-    column = column.replace("transaction", "trx")
-    column = column.replace("quantity","qty")
-    column = column.replace("manufacturer","manuf")
-    column = column.replace("process","proc")
-    column = column.replace("recommended","rec")
-    column = column.replace("location", "loc")
-    column = column.replace("request", "Req")
-    column = column.replace("monthly_inventory_on_hand", "MIOH")
-    column = column.replace("substitute", "sub")
-    column = column.replace("srcReqer", "SrcRequester")
-    if "FROM PBO_Sam_PVA" in column:
-        column = column.replace("_"," ")
-    else:
-        column = column.replace("_","")
-    return column
-
 
 def generate_prompt(instruction, input=None):
     if input:
@@ -235,5 +144,3 @@ def eval_with_prompt(concept, essay_struct, model_path):
     torch.cuda.empty_cache()
 
     return label_list, pred_list
-
-

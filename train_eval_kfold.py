@@ -100,8 +100,7 @@ def compute_metrics(results):
             else:
                 answer = "fail"
         pred_list.append(answer)
-    # print("predict = ")
-    # print(pred_list)    
+        
     for row_id in range(len(label_tok_list)):
         row = label_tok_list[row_id]
         output = global_tokenizer.decode(row[row > 0]).replace("<s>", "").replace("<unk>", "").replace("</s>", "")
@@ -120,10 +119,6 @@ def compute_metrics(results):
                 pred_list[row_id] = "no"
             else:
                 pred_list[row_id] = "yes"
-    # print("pred_list corrected = ")
-    # print(pred_list)
-    # print("label = ")
-    # print(label_list)
 
     # Calculate and store metrics
     accuracy = accuracy_score(label_list, pred_list)
