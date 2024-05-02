@@ -17,7 +17,7 @@ Create a new conda environment and install requirements:
 ```
 conda create -n env_name
 conda activate env_name
-pip install -r requirements.txt
+pip install -r requirements.txt # missing file uh oh
 ```
 
 ```
