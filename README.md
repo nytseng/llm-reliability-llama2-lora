@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ```
 
 ```
-python3 train_model.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model13' --num_epochs=65 --data_path='essay_train_examples2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 
+python3 train_eval_kfold.py --base_model='meta-llama/Llama-2-7b-hf' --output_dir='models/essay_model13' --num_epochs=65 --data_path='essay_train_examples2.json' --val_set_size=1 --lora_target_modules='[q_proj,k_proj,v_proj,o_proj]' --learning_rate=0.005 --cutoff_len=1000 
 ```
 
 
